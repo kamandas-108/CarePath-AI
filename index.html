@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CarePath AI – Symptom-to-Care Navigator</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Leaflet OpenStreetMap CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <style>
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
+            color: #f8fafc;
+            min-height: 100vh;
+        }
+        .glass-card {
+            background: rgba(255, 255, 255, 0.03);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 1rem;
+        }
+        .active-tab {
+            background: rgba(99, 102, 241, 0.2);
+            border-color: rgba(99, 102, 241, 0.5);
+            color: #818cf8;
+        }
+        #map {
+            height: 380px;
+            border-radius: 1rem;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+    </style>
+</head>
+<body class="flex flex-col justify-between">
+
+    <!-- Global Variables & Render Deployment URL Configuration -->
+    <script>
+        // ONRENDER LINK CONFIGURATION
+        // If deploying to Render, paste your live backend domain URL inside the quotes below.
+        // Leave it as empty string "" to dynamically infer local routing.
+        const RENDER_BACKEND_URL = ""; 
+        
+        function getApiUrl(path) {
+            return RENDER_BACKEND_URL ? `${RENDER_BACKEND_URL}${path}` : path;
+        }
+    </script>
+
+    <!-- Navigation Header Bar -->
+    <header class="glass-card mx-4 mt-4 px-6 py-4 flex flex-wrap justify-between items-center gap-4 z-50">
+        <div class="flex items-center gap-3">
+            <div class="p-2 bg-indigo-600 rounded-lg shadow-lg animate-pulse text-xl">✨</div>
+            <h1 class="text-2xl font-bold tracking-tight bg-gradient-to-r from-indigo-400 to-emerald-400 bg-clip-text text-transparent">CarePath AI</h1>
+        </div>
+        <nav class="flex items-center gap-2 flex-wrap">
+            <button onclick="switchTab('dashboard')" id="tab-dashboard" class="px-4 py-2 rounded-lg text-sm font-medium transition active-tab">Dashboard</button>
+            <button onclick="switchTab('tracker')" id="tab-tracker" class="px-4 py-2 rounded-lg text-sm font-medium transition text-slate-400 hover:text-slate-200">Journey Tracker</button>
+            <button onclick="switchTab('reminders')" id="tab-reminders" class="px-4 py-2 rounded-lg text-sm font-medium transition text-slate-400 hover:text-slate-200">Reminders</button>
+            <button onclick="switchTab('maps')" id="tab-maps" class="px-4 py-2 rounded-lg text-sm font-medium transition text-slate-400 hover:text-slate-200">Nearby Finder</button>
+            <button onclick="switchTab('about')" id="tab-about" class="px-4 py-2 rounded-lg text-sm font-medium transition text-slate-400 hover:text-slate-200">About</button>
+        </nav>
+        <div id="auth-header-section" class="flex items-center gap-3">
+            <!-- Dynamically populated auth state controls -->
+            <button onclick="openAuthModal()" class="bg-indigo-600 hover:bg-indigo-500 transition px-4 py-2 rounded-lg text-sm font-medium shadow">Sign In</button>
+        </div>
+    </header>
+
+    <!-- Main Dynamic Content Wrapper Container -->
+    <main class="container mx-auto px-4 py-8 flex-grow">
+        
+        <!-- DASHBOARD TAB VIEW -->
+        <section id="view-dashboard" class="space-y-6">
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <!-- Inputs Section Column -->
+                <div class="lg:col-span-1 glass-card p-6 flex flex-col justify-between space-y-4">
+                    <div>
+                        <h3 class="text-xl font-semibold mb-2 text-indigo-300">Symptom Assessment</h3>
+                        <p class="text-xs text-slate-400 mb-4">Select preferred input language and enter what you are experiencing natively or via voice.</p>
+                        
+                        <label class="block text-xs uppercase font-semibold text-slate-400 mb-1">Language Support</label>
+                        <select id="language-selector" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm focus:outline-none focus:border-indigo-500 text-slate-200 mb-4">
+                            <option value="English">English</option>
+                            <option value="Hindi">Hindi (हिंदी)</option>
+                            <option value="Odia">Odia (ଓଡ଼ିଆ)</option>
+                            <option value="Bengali">Bengali (বাংলা)</option>
+                        </select>
+
+                        <label class="block text-xs uppercase font-semibold text-slate-400 mb-1">Describe Symptoms</label>
+                        <textarea id="symptom-input" rows="5" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm focus:outline-none focus:border-indigo-500 text-slate-200 placeholder-slate-500" placeholder="e.g., I have fever, headache, and sore throat for 2 days..."></textarea>
+                    </div>
+
+                    <div class="space-y-2 pt-2">
+                        <!-- Native Speech Capture Controller Button -->
+                        <button type="button" onclick="startVoiceRecognition()" id="mic-btn" class="w-full flex items-center justify-center gap-2 border border-slate-700 hover:border-indigo-500 bg-slate-900 transition p-3 rounded-lg text-sm font-medium text-slate-300">
+                            <span id="mic-icon">🎙️</span> <span id="mic-text">Voice Symptom Input</span>
+                        </button>
+                        <button onclick="runSymptomAnalysis()" class="w-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 transition py-3 rounded-lg text-sm font-semibold shadow-lg text-white">
+                            Analyze Symptoms AI
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Live Results Output Column -->
+                <div class="lg:col-span-2 glass-card p-6 flex flex-col justify-center min-h-[350px]">
+                    <div id="results-placeholder" class="text-center space-y-2 text-slate-500 p-8">
+                        <div class="text-4xl">🧬</div>
+                        <p class="text-sm">Awaiting assessment entry. Results and care workflows generated by CarePath AI engine appear here.</p>
+                    </div>
+
+                    <!-- Loader element -->
+                    <div id="results-loader" class="hidden text-center space-y-3">
+                        <div class="inline-block animate-spin rounded-full h-8 w-8 border-4 border-indigo-500 border-t-transparent"></div>
+                        <p class="text-sm text-indigo-300">CarePath AI is processing metrics and checking historical trajectories...</p>
+                    </div>
+
+                    <!-- Populated Output Content Card -->
+                    <div id="results-container" class="hidden space-y-6">
+                        <div class="flex flex-wrap justify-between items-center gap-4 border-b border-slate-800 pb-4">
+                            <div>
+                                <h4 class="text-lg font-bold text-slate-200">AI Assessment Stream</h4>
+                                <p class="text-xs text-slate-400">Educational risk matrix estimation</p>
+                            </div>
+                            <div id="risk-badge" class="px-3 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider">
+                                Low Risk
+                            </div>
+                        </div>
+
+                        <!-- Grid row metrics tracking conditions and clinical service direction -->
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div class="bg-slate-900/50 p-4 rounded-xl border border-slate-800">
+                                <h5 class="text-xs uppercase font-semibold text-slate-400 mb-2">Estimated Educational Causes</h5>
+                                <div id="conditions-list" class="space-y-2">
+                                    <!-- Populated programmatically -->
+                                </div>
+                            </div>
+                            <div class="bg-slate-900/50 p-4 rounded-xl border border-slate-800">
+                                <h5 class="text-xs uppercase font-semibold text-indigo-400 mb-1">Recommended Pathway</h5>
+                                <p id="care-recommendation" class="text-sm text-slate-200 font-medium leading-relaxed"></p>
+                            </div>
+                        </div>
+
+                        <!-- System health education block summaries -->
+                        <div class="space-y-2 bg-slate-900/40 p-4 rounded-xl border border-slate-800/60">
+                            <h5 class="text-sm font-semibold text-emerald-400">Health Education Insights</h5>
+                            <p id="care-education" class="text-xs text-slate-300 leading-relaxed"></p>
+                        </div>
+
+                        <div class="p-3 bg-red-950/30 border border-red-900/50 rounded-xl">
+                            <p class="text-xs text-red-300"><strong class="text-red-400">⚠️ Emergency Red Flags:</strong> <span id="care-warnings"></span></p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- JOURNEY TRACKER TAB VIEW -->
+        <section id="view-tracker" class="hidden space-y-6">
+            <div class="max-w-3xl mx-auto glass-card p-6">
+                <div class="mb-6 flex justify-between items-center">
+                    <div>
+                        <h3 class="text-xl font-semibold text-indigo-300">Health Journey Tracker Timeline</h3>
+                        <p class="text-xs text-slate-400">Logs data trends across entries over days to flag deteriorating patterns seamlessly.</p>
+                    </div>
+                    <button onclick="fetchHistoryTimeline()" class="text-xs bg-slate-800 border border-slate-700 text-slate-300 px-3 py-1.5 rounded hover:bg-slate-700 transition">🔄 Refresh Logs</button>
+                </div>
+
+                <div id="tracker-auth-warning" class="text-center p-8 bg-slate-900/50 rounded-xl border border-slate-800 space-y-3">
+                    <p class="text-sm text-slate-400">Authentication is required to track chronological trends dynamically.</p>
+                    <button onclick="openAuthModal()" class="bg-indigo-600 px-4 py-2 rounded-lg text-xs font-semibold hover:bg-indigo-500 transition">Sign In Now</button>
+                </div>
+
+                <div id="tracker-timeline-container" class="hidden relative border-l-2 border-slate-800 ml-4 space-y-6">
+                    <!-- Populated programmatically via API logs iteration -->
+                </div>
+            </div>
+        </section>
+
+        <!-- REMINDERS TAB VIEW -->
+        <section id="view-reminders" class="hidden space-y-6">
+            <div class="max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-6">
+                
+                <!-- Setup Form card component -->
+                <div class="glass-card p-5 space-y-4 h-fit">
+                    <h3 class="text-lg font-semibold text-indigo-300">Set Health Reminder</h3>
+                    
+                    <div>
+                        <label class="block text-xs text-slate-400 font-medium mb-1">Reminder Category</label>
+                        <select id="reminder-type" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-slate-200">
+                            <option value="💊 Medicine Dose">💊 Medicine Dose</option>
+                            <option value="💧 Hydration Water">💧 Hydration / Water</option>
+                            <option value="📅 Doctor Appointment">📅 Appointment</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs text-slate-400 font-medium mb-1">Label Name / Details</label>
+                        <input id="reminder-title" type="text" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-slate-200" placeholder="e.g., Paracetamol 650mg">
+                    </div>
+
+                    <div>
+                        <label class="block text-xs text-slate-400 font-medium mb-1">Trigger Time</label>
+                        <input id="reminder-time" type="time" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-slate-200">
+                    </div>
+
+                    <button onclick="addNewReminder()" class="w-full bg-emerald-600 hover:bg-emerald-500 transition py-2 rounded-lg text-xs font-semibold text-white">
+                        Add Reminder Schedule
+                    </button>
+                </div>
+
+                <!-- Reminders Render List Feed -->
+                <div class="md:col-span-2 glass-card p-5">
+                    <h3 class="text-lg font-semibold text-slate-200 mb-4">Active Schedules</h3>
+                    <div id="reminders-list-target" class="space-y-3">
+                        <!-- Default placeholder -->
+                        <p class="text-xs text-slate-500 text-center py-8">No active timers or alerts set for today.</p>
+                    </div>
+                </div>
+
+            </div>
+        </section>
+
+        <!-- NEARBY HEALTHCARE FINDER MAP VIEW -->
+        <section id="view-maps" class="hidden space-y-4">
+            <div class="glass-card p-5 space-y-4">
+                <div class="flex flex-wrap justify-between items-center gap-4">
+                    <div>
+                        <h3 class="text-xl font-semibold text-indigo-300">Nearby Healthcare Finder</h3>
+                        <p class="text-xs text-slate-400">Interactive OpenStreetMap utility showing healthcare facilities within range.</p>
+                    </div>
+                    <button onclick="triggerGeolocationRouting()" class="bg-indigo-600 hover:bg-indigo-500 text-white transition text-xs font-semibold px-4 py-2 rounded-lg shadow">
+                        📍 Locate Nearest Facilities
+                    </button>
+                </div>
+
+                <div id="map-container-wrapper">
+                    <div id="map"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ABOUT INFRASTRUCTURE VIEW -->
+        <section id="view-about" class="hidden max-w-2xl mx-auto glass-card p-6 space-y-4">
+            <h3 class="text-xl font-bold text-indigo-300">About CarePath AI</h3>
+            <p class="text-sm text-slate-300 leading-relaxed">
+                CarePath AI is developed to bridge the informational gap encountered by patients researching common symptoms online. By substituting generic search results with localized structured categorization systems (Low, Medium, and High risk profiles), patients understand standard healthcare navigation procedures immediately.
+            </p>
+            <div class="bg-slate-900/60 p-4 rounded-xl border border-slate-800 space-y-2 text-xs text-slate-400">
+                <p>💡 <strong>Note on AI:</strong> This software architecture uses Google Gemini-2.5-Flash processing models. Medical assertions do not serve as alternative clinical checkups.</p>
+                <p>🗺️ <strong>Data & Maps:</strong> OpenStreetMap mapping frameworks operate independent of personal tracker configurations.</p>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- User Authentication Modal Popup View -->
+    <div id="auth-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+        <div class="w-full max-w-sm glass-card p-6 bg-slate-900/95 space-y-4 shadow-2xl">
+            <div class="flex justify-between items-center">
+                <h4 id="auth-modal-title" class="text-lg font-bold text-slate-200">Sign In to CarePath</h4>
+                <button onclick="closeAuthModal()" class="text-slate-400 hover:text-slate-200 text-lg">&times;</button>
+            </div>
+            
+            <div class="space-y-3">
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1">Username</label>
+                    <input id="auth-username" type="text" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-sm text-slate-200">
+                </div>
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1">Password</label>
+                    <input id="auth-password" type="password" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-sm text-slate-200">
+                </div>
+            </div>
+
+            <div id="auth-error-msg" class="hidden text-xs text-red-400"></div>
+
+            <div class="space-y-2 pt-2">
+                <button id="auth-primary-btn" onclick="submitAuthFlow('login')" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-medium py-2 rounded-lg text-sm transition">Login</button>
+                <p id="auth-toggle-footer" class="text-xs text-slate-400 text-center">
+                    New user? <a href="#" onclick="toggleAuthMode(true)" class="text-indigo-400 underline">Create account</a>
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Website Standard Footer Compliance -->
+    <footer class="glass-card mx-4 mb-4 p-4 text-center space-y-1 text-xs text-slate-500">
+        <p>Developed and deployed by Kaman Das ©2026</p>
+        <p class="text-slate-400 font-medium">Made with Love ❤️</p>
+    </footer>
+
+    <!-- Leaflet JS OpenStreetMap Script Dependency Loading Area -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    
+    <!-- Application Logic Control Script Block Area -->
+    <script>
+        // Tab switching matrix system logic
+        function switchTab(tabId) {
+            const tabs = ['dashboard', 'tracker', 'reminders', 'maps', 'about'];
+            tabs.forEach(t => {
+                document.getElementById(`view-${t}`).classList.add('hidden');
+                document.getElementById(`tab-${t}`).classList.remove('active-tab');
+                document.getElementById(`tab-${t}`).classList.add('text-slate-400');
+            });
+            document.getElementById(`view-${tabId}`).classList.remove('hidden');
+            document.getElementById(`tab-${tabId}`).classList.add('active-tab');
+
+            // Initialize Map dynamically if tab selected
+            if(tabId === 'maps') {
+                setTimeout(() => { initializeMapLayout(); }, 200);
+            }
+            if(tabId === 'tracker') {
+                fetchHistoryTimeline();
+            }
+        }
+
+        // --- AUTHENTICATION FLOWS CLIENT SCRIPTS ---
+        let isSignupMode = false;
+        let currentUser = null;
+
+        function checkAuthStatus() {
+            fetch(getApiUrl('/api/auth/status'))
+            .then(res => res.json())
+            .then(data => {
+                if(data.logged_in) {
+                    currentUser = data.username;
+                    renderAuthHeaderState(true);
+                } else {
+                    currentUser = null;
+                    renderAuthHeaderState(false);
+                }
+            }).catch(err => console.error("Auth sync lookup issue: ", err));
+        }
+
+        function renderAuthHeaderState(loggedIn) {
+            const container = document.getElementById('auth-header-section');
+            if(loggedIn) {
+                container.innerHTML = `
+                    <div class="flex items-center gap-2">
+                        <span class="text-xs bg-indigo-950 text-indigo-300 border border-indigo-800 px-2.5 py-1 rounded-md font-medium">👤 ${currentUser}</span>
+                        <button onclick="triggerLogout()" class="text-xs text-slate-400 hover:text-red-400 transition underline font-medium">Logout</button>
+                    </div>
+                `;
+                document.getElementById('tracker-auth-warning').classList.add('hidden');
+                document.getElementById('tracker-timeline-container').classList.remove('hidden');
+            } else {
+                container.innerHTML = `<button onclick="openAuthModal()" class="bg-indigo-600 hover:bg-indigo-500 transition px-4 py-2 rounded-lg text-sm font-medium shadow text-white">Sign In</button>`;
+                document.getElementById('tracker-auth-warning').classList.remove('hidden');
+                document.getElementById('tracker-timeline-container').classList.add('hidden');
+            }
+        }
+
+        function openAuthModal() {
+            document.getElementById('auth-error-msg').classList.add('hidden');
+            toggleAuthMode(false);
+            document.getElementById('auth-modal').classList.remove('hidden');
+        }
+        function closeAuthModal() {
+            document.getElementById('auth-modal').classList.add('hidden');
+        }
+
+        function toggleAuthMode(signup) {
+            isSignupMode = signup;
+            document.getElementById('auth-modal-title').innerText = signup ? "Create CarePath Profile" : "Sign In to CarePath";
+            document.getElementById('auth-primary-btn').innerText = signup ? "Register Account" : "Login";
+            document.getElementById('auth-primary-btn').setAttribute('onclick', signup ? "submitAuthFlow('signup')" : "submitAuthFlow('login')");
+            document.getElementById('auth-toggle-footer').innerHTML = signup ? 
+                `Already have an account? <a href="#" onclick="toggleAuthMode(false)" class="text-indigo-400 underline">Sign In Instead</a>` : 
+                `New user? <a href="#" onclick="toggleAuthMode(true)" class="text-indigo-400 underline">Create account</a>`;
+        }
+
+        function submitAuthFlow(endpoint) {
+            const userIn = document.getElementById('auth-username').value.trim();
+            const passIn = document.getElementById('auth-password').value.trim();
+            const errDiv = document.getElementById('auth-error-msg');
+            
+            if(!userIn || !passIn) {
+                errDiv.innerText = "Please complete credentials parameters.";
+                errDiv.classList.remove('hidden');
+                return;
+            }
+
+            fetch(getApiUrl(`/api/auth/${endpoint}`), {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({username: userIn, password: passIn})
+            })
+            .then(res => {
+                if(!res.ok) return res.json().then(err => { throw new Error(err.message || "Failed execution") });
+                return res.json();
+            })
+            .then(data => {
+                currentUser = data.user.username;
+                renderAuthHeaderState(true);
+                closeAuthModal();
+                if(endpoint === 'login' || endpoint === 'signup') {
+                    fetchHistoryTimeline();
+                }
+            })
+            .catch(err => {
+                errDiv.innerText = err.message;
+                errDiv.classList.remove('hidden');
+            });
+        }
+
+        function triggerLogout() {
+            fetch(getApiUrl('/api/auth/logout'), {method: 'POST'})
+            .then(() => {
+                currentUser = null;
+                renderAuthHeaderState(false);
+                switchTab('dashboard');
+            });
+        }
+
+
+        // --- NATIVE SPEECH CAPTURE LOGIC (WEB SPEECH API) ---
+        let recognitionEngine;
+        function startVoiceRecognition() {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRecognition) {
+                alert("Web Speech recording functionality is unsupported by your current native browser framework.");
+                return;
+            }
+
+            if(!recognitionEngine) {
+                recognitionEngine = new SpeechRecognition();
+                recognitionEngine.continuous = false;
+                
+                // Read targeted language setting parameter configured in UI dropdown select element dynamically
+                const selLang = document.getElementById('language-selector').value;
+                if(selLang === 'Hindi') recognitionEngine.lang = 'hi-IN';
+                else if(selLang === 'Odia') recognitionEngine.lang = 'or-IN';
+                else if(selLang === 'Bengali') recognitionEngine.lang = 'bn-IN';
+                else recognitionEngine.lang = 'en-US';
+
+                recognitionEngine.onstart = () => {
+                    document.getElementById('mic-text').innerText = "Listening closely...";
+                    document.getElementById('mic-btn').classList.add('border-red-500', 'text-red-400');
+                };
+
+                recognitionEngine.onerror = (e) => {
+                    console.error(e);
+                    resetMicBtnDisplay();
+                };
+
+                recognitionEngine.onend = () => {
+                    resetMicBtnDisplay();
+                };
+
+                recognitionEngine.onresult = (event) => {
+                    const textResult = event.results[0][0].transcript;
+                    document.getElementById('symptom-input').value = textResult;
+                };
+            }
+            recognitionEngine.start();
+        }
+
+        function resetMicBtnDisplay() {
+            document.getElementById('mic-text').innerText = "Voice Symptom Input";
+            document.getElementById('mic-btn').classList.remove('border-red-500', 'text-red-400');
+            recognitionEngine = null; // force clear to cleanly reset selected dialect configuration dynamically later
+        }
+
+
+        // --- CORE AI PIPELINE HANDLERS ---
+        function runSymptomAnalysis() {
+            const symptomsText = document.getElementById('symptom-input').value.trim();
+            const langValue = document.getElementById('language-selector').value;
+
+            if(!symptomsText) {
+                alert("Please declare symptom attributes first.");
+                return;
+            }
+
+            document.getElementById('results-placeholder').classList.add('hidden');
+            document.getElementById('results-container').classList.add('hidden');
+            document.getElementById('results-loader').classList.remove('hidden');
+
+            fetch(getApiUrl('/api/analyze'), {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ symptoms: symptomsText, language: langValue })
+            })
+            .then(res => res.json())
+            .then(resData => {
+                document.getElementById('results-loader').classList.add('hidden');
+                if(!resData.success) {
+                    alert(resData.message || "An runtime failure block context triggered.");
+                    document.getElementById('results-placeholder').classList.remove('hidden');
+                    return;
+                }
+
+                const payload = resData.data;
+                
+                // Handle risk visual assignment variations configuration
+                const riskBadge = document.getElementById('risk-badge');
+                riskBadge.innerText = `${payload.risk_level} Risk`;
+                riskBadge.className = "px-3 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider ";
+                
+                if(payload.risk_level.toLowerCase().includes('high')) {
+                    riskBadge.classList.add('bg-red-950', 'text-red-400', 'border', 'border-red-700');
+                } else if(payload.risk_level.toLowerCase().includes('medium') || payload.risk_level.toLowerCase().includes('moderate')) {
+                    riskBadge.classList.add('bg-yellow-950', 'text-yellow-400', 'border', 'border-yellow-700');
+                } else {
+                    riskBadge.classList.add('bg-emerald-950', 'text-emerald-400', 'border', 'border-emerald-700');
+                }
+
+                // Append estimated underlying conditions loop parameters
+                const conditionsList = document.getElementById('conditions-list');
+                conditionsList.innerHTML = '';
+                payload.conditions.forEach(cond => {
+                    conditionsList.innerHTML += `
+                        <div class="flex justify-between items-center text-xs p-2 bg-slate-950/60 rounded border border-slate-800">
+                            <span class="text-slate-300 font-medium">${cond.name}</span>
+                            <span class="text-indigo-400 font-semibold bg-indigo-950/40 px-2 py-0.5 rounded">${cond.confidence}</span>
+                        </div>
+                    `;
+                });
+
+                document.getElementById('care-recommendation').innerText = payload.recommendation;
+                document.getElementById('care-education').innerText = payload.education;
+                document.getElementById('care-warnings').innerText = payload.warnings;
+
+                document.getElementById('results-container').classList.remove('hidden');
+            })
+            .catch(err => {
+                console.error(err);
+                document.getElementById('results-loader').classList.add('hidden');
+                document.getElementById('results-placeholder').classList.remove('hidden');
+                alert("Failed connecting to the backend intelligence cluster.");
+            });
+        }
+
+
+        // --- HISTORICAL LOGS TIMELINE RENDERER ---
+        function fetchHistoryTimeline() {
+            if(!currentUser) return;
+            const container = document.getElementById('tracker-timeline-container');
+            container.innerHTML = `<p class="text-xs text-slate-500 text-center py-6">Syncing chronological database data tracking matrix...</p>`;
+
+            fetch(getApiUrl('/api/history'))
+            .then(res => res.json())
+            .then(data => {
+                if(!data.success || data.logs.length === 0) {
+                    container.innerHTML = `<p class="text-xs text-slate-500 text-center py-6">No clinical symptoms evaluated yet on profile record.</p>`;
+                    return;
+                }
+                container.innerHTML = '';
+                data.logs.forEach(log => {
+                    container.innerHTML += `
+                        <div class="relative pl-6 pb-2">
+                            <div class="absolute -left-1.5 mt-1.5 w-3 h-3 rounded-full bg-indigo-500 border border-slate-900"></div>
+                            <div class="bg-slate-900/60 p-4 rounded-xl border border-slate-800 space-y-2">
+                                <div class="flex flex-wrap justify-between items-center gap-2 text-xs">
+                                    <span class="text-slate-400 font-mono">${log.logged_at}</span>
+                                    <span class="font-bold px-2 py-0.5 rounded text-[10px] uppercase tracking-wider bg-slate-800 text-slate-300">${log.risk_level} Risk</span>
+                                </div>
+                                <p class="text-xs font-semibold text-indigo-200">" ${log.symptoms} "</p>
+                                <p class="text-[11px] text-slate-400 leading-relaxed border-t border-slate-800/80 pt-2"><strong class="text-emerald-400">Insights:</strong> ${log.ai_response.education}</p>
+                            </div>
+                        </div>
+                    `;
+                });
+            })
+            .catch(err => {
+                container.innerHTML = `<p class="text-xs text-red-400 text-center py-6">Error polling metrics data.</p>`;
+            });
+        }
+
+
+        // --- ALERTS / REMINDERS LOCAL MANAGEMENT SYSTEM ---
+        let storageReminders = [
+            { id: 1, type: "💊 Medicine Dose", title: "Amoxicillin Antibiotic", time: "08:00" },
+            { id: 2, type: "💧 Hydration Water", title: "Targeted Hydration Intake", time: "13:00" }
+        ];
+
+        function renderRemindersView() {
+            const listTarget = document.getElementById('reminders-list-target');
+            if(storageReminders.length === 0) {
+                listTarget.innerHTML = `<p class="text-xs text-slate-500 text-center py-8">No active timers or alerts set for today.</p>`;
+                return;
+            }
+            listTarget.innerHTML = '';
+            storageReminders.forEach(rem => {
+                listTarget.innerHTML += `
+                    <div class="flex justify-between items-center bg-slate-900/50 p-3.5 rounded-xl border border-slate-800">
+                        <div class="space-y-0.5">
+                            <div class="text-xs font-bold text-slate-300">${rem.type}</div>
+                            <div class="text-sm text-indigo-200 font-medium">${rem.title}</div>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <span class="text-xs font-mono bg-slate-950 px-2 py-1 rounded text-emerald-400 border border-emerald-950">⏰ ${rem.time}</span>
+                            <button onclick="removeReminderSchedule(${rem.id})" class="text-xs text-slate-500 hover:text-red-400 transition">&times; Remove</button>
+                        </div>
+                    </div>
+                `;
+            });
+        }
+
+        function addNewReminder() {
+            const type = document.getElementById('reminder-type').value;
+            const title = document.getElementById('reminder-title').value.trim();
+            const time = document.getElementById('reminder-time').value;
+
+            if(!title || !time) {
+                alert("Please fill name designation metrics and timeline clock details.");
+                return;
+            }
+
+            storageReminders.push({ id: Date.now(), type, title, time });
+            document.getElementById('reminder-title').value = '';
+            document.getElementById('reminder-time').value = '';
+            renderRemindersView();
+        }
+
+        function removeReminderSchedule(id) {
+            storageReminders = storageReminders.filter(r => r.id !== id);
+            renderRemindersView();
+        }
+
+
+        // --- FREE OPENSTREETMAP LEAFLET MAPPING IMPLEMENTATION ---
+        let leafletMapInstance = null;
+        function initializeMapLayout() {
+            if(leafletMapInstance) return; // Prevent recreation bugs across view tabs
+            
+            // Center map roughly coordinates (Default fallback center parameter layout)
+            leafletMapInstance = L.map('map').setView([20.2961, 85.8245], 13);
+
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+                attribution: '© OpenStreetMap contributors'
+            }).addTo(leafletMapInstance);
+
+            // Populate sample default health centers infrastructure elements coordinates around base view for context markers
+            const simulatedFacilities = [
+                { name: "CarePath Municipal General Clinic", lat: 20.3010, lon: 85.8310, type: "Clinic" },
+                { name: "City Emergency Referral Trauma Hospital", lat: 20.2890, lon: 85.8150, type: "Hospital" },
+                { name: "Apex 24/7 Wellness Pharmacy", lat: 20.2950, lon: 85.8290, type: "Pharmacy" }
+            ];
+
+            simulatedFacilities.forEach(place => {
+                L.marker([place.lat, place.lon])
+                 .addTo(leafletMapInstance)
+                 .bindPopup(`<b>${place.name}</b><br><span class="text-xs text-slate-600">${place.type} Facility</span>`);
+            });
+        }
+
+        function triggerGeolocationRouting() {
+            if (!navigator.geolocation) {
+                alert("Geolocation mapping services are blocked or unsupported.");
+                return;
+            }
+            navigator.geolocation.getCurrentPosition(
+                (pos) => {
+                    const lat = pos.coords.latitude;
+                    const lon = pos.coords.longitude;
+                    
+                    if(leafletMapInstance) {
+                        leafletMapInstance.setView([lat, lon], 14);
+                        L.marker([lat, lon]).addTo(leafletMapInstance)
+                         .bindPopup("<b>Your Current Position</b>").openPopup();
+
+                        // Add a mock nearby facility relative to user position
+                        L.marker([lat + 0.005, lon + 0.003]).addTo(leafletMapInstance)
+                         .bindPopup("<b>📍 Nearest Regional Hospital Found</b><br>Distance: 1.2 km away");
+                        L.marker([lat - 0.003, lon - 0.004]).addTo(leafletMapInstance)
+                         .bindPopup("<b>📍 Community Care Pharmacy Hub</b><br>Distance: 450 m away");
+                    }
+                },
+                (err) => {
+                    alert("Unable to securely access your device location permissions. Defaulting view metrics grid context.");
+                }
+            );
+        }
+
+        // Initialize state checks
+        window.addEventListener('DOMContentLoaded', () => {
+            checkAuthStatus();
+            renderRemindersView();
+        });
+    </script>
+</body>
+</html>
