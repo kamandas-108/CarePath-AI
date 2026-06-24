@@ -1,0 +1,5 @@
+Flask3.0.3
+python-dotenv1.0.1
+google-generativeai0.5.4
+psycopg2-binary2.9.9
+gunicorn==22.0.0
