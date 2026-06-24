@@ -158,11 +158,84 @@ def analyze_symptoms():
         except Exception as e:
             print(f"Error fetching user logs: {e}")
 
-    system_prompt = (
-        f"You are a healthcare assistant. Analyze symptoms strictly for educational awareness.\n"
-        f"Never provide a definitive medical diagnosis. Always advise consulting healthcare professionals.\n"
-        f"Target response translation language: {language}.\n"
-        f"If the incoming symptom input language matches Hindi, Odia, or Bengali, read it comfortably and respond in that targeted script or language choice requested.\n\n"
-        f"Analyze the following user input: \"{symptoms}\".{history_context}\n\n"
-        f"CRITICAL: If historical context shows an escalating trend (e.g. fever going up across entries or spreading pain), explicitly note this in the Health Education text.\n\n"
-        f"You must respond ONLY with a clean, raw JSON block. Do not format it inside
+    # Triple-quote syntax fixes the string literal line-break error
+    system_prompt = f"""You are a healthcare assistant. Analyze symptoms strictly for educational awareness.
+Never provide a definitive medical diagnosis. Always advise consulting healthcare professionals.
+Target response translation language: {language}.
+If the incoming symptom input language matches Hindi, Odia, or Bengali, read it comfortably and respond in that targeted script or language choice requested.
+
+Analyze the following user input: "{symptoms}".{history_context}
+
+CRITICAL: If historical context shows an escalating trend (e.g. fever going up across entries or spreading pain), explicitly note this in the Health Education text.
+
+You must respond ONLY with a clean, raw JSON block. Do not format it inside markdown syntax blocks. Ensure it matches this exact structure keys:
+{{
+  "conditions": [
+    {{"name": "Condition Name", "confidence": "Percentage%"}}
+  ],
+  "risk_level": "Low" or "Medium" or "High",
+  "recommendation": "Specific service recommendation structure based on system guidelines (e.g., Home Care, General Physician, Specialist, or Emergency Room)",
+  "education": "Simple educational explanation of conditions, including tracking trends if relevant.",
+  "warnings": "Emergency warning signs requiring immediate action."
+}}"""
+
+    try:
+        model = genai.GenerativeModel('gemini-2.5-flash')
+        response = model.generate_content(system_prompt)
+        text_response = response.text.strip()
+        
+        # Strip potential markdown syntax wrapping code blocks if Gemini accidentally provides them
+        if text_response.startswith("```"):
+            text_response = text_response.replace("```json", "").replace("```", "").strip()
+
+        parsed_json = json.loads(text_response)
+
+        # Save to database if user is logged in
+        if 'user_id' in session:
+            try:
+                conn = get_db_connection()
+                cur = conn.cursor()
+                cur.execute(
+                    "INSERT INTO health_logs (user_id, symptoms, ai_response, risk_level) VALUES (%s, %s, %s, %s);",
+                    (session['user_id'], symptoms, json.dumps(parsed_json), parsed_json.get('risk_level', 'Low'))
+                )
+                conn.commit()
+                cur.close()
+                conn.close()
+            except Exception as ex:
+                print(f"Failed to log entry: {ex}")
+
+        return jsonify({"success": True, "data": parsed_json})
+
+    except Exception as e:
+        return jsonify({"success": False, "message": f"AI Processing Error: {str(e)}"}), 500
+
+
+# --- HEALTH LOGS / TRACKER HISTORICAL TIMELINE ---
+@app.route('/api/history', methods=['GET'])
+def get_history():
+    if 'user_id' not in session:
+        return jsonify({"success": False, "message": "Unauthorized"}), 401
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT symptoms, ai_response, risk_level, logged_at FROM health_logs WHERE user_id = %s ORDER BY logged_at DESC;", (session['user_id'],))
+        logs = cur.fetchall()
+        cur.close()
+        conn.close()
+        
+        formatted_logs = []
+        for l in logs:
+            formatted_logs.append({
+                "symptoms": l['symptoms'],
+                "ai_response": json.loads(l['ai_response']),
+                "risk_level": l['risk_level'],
+                "logged_at": l['logged_at'].strftime('%Y-%m-%d %H:%M:%S')
+            })
+        return jsonify({"success": True, "logs": formatted_logs})
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000, debug=True)
